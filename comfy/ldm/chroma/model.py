@@ -6,6 +6,7 @@ import torch
 from torch import Tensor, nn
 from einops import rearrange, repeat
 import comfy.ldm.common_dit
+from .common import pad_to_patch_size, rms_norm
 
 from .layers import (
     DoubleStreamBlock,
@@ -69,17 +70,13 @@ class Chroma(nn.Module):
         self.img_in = operations.Linear(self.in_channels, self.hidden_size, bias=True, dtype=dtype, device=device)
         self.txt_in = operations.Linear(params.context_in_dim, self.hidden_size, dtype=dtype, device=device)
         # set as nn identity for now, will overwrite it later.
-        self.distilled_guidance_layer = nn.ModuleList(
-            [
-                Approximator(
+        self.distilled_guidance_layer = Approximator(
                     in_dim=self.in_dim,
                     hidden_dim=self.hidden_dim,
                     out_dim=self.out_dim,
                     n_layers=self.n_layers,
                     dtype=dtype, device=device, operations=operations
                 )
-            ]
-        )
 
         self.double_blocks = nn.ModuleList(
             [
@@ -248,23 +245,25 @@ class Chroma(nn.Module):
         img = self.img_in(img)
         print(f"img has the value {img.size()}")
 
+        device = img.device
+        dtype = img.dtype
         # distilled vector guidance
         mod_index_length = 344
         print(f"mod_index_length has the value {mod_index_length}")
-        distill_timestep = timestep_embedding(timesteps.detach().clone(), 16)
+        distill_timestep = timestep_embedding(timesteps.detach().clone(), 16).to(device=device, dtype=dtype)
         print(f"distill_timestep has the value {distill_timestep}")
         # guidance = guidance *
-        distil_guidance = timestep_embedding(guidance.detach().clone(), 16)
+        distil_guidance = timestep_embedding(guidance.detach().clone(), 16).to(device=device, dtype=dtype)
         print(f"distil_guidance has the value {distil_guidance}")
 
         # get all modulation index
-        modulation_index = timestep_embedding(torch.arange(mod_index_length), 32)
+        modulation_index = timestep_embedding(torch.arange(mod_index_length), 32).to(device=device, dtype=dtype)
         print(f"modulation_index has the value {modulation_index}")
         # we need to broadcast the modulation index here so each batch has all of the index
-        modulation_index = modulation_index.unsqueeze(0).repeat(img.shape[0], 1, 1)
+        modulation_index = modulation_index.unsqueeze(0).repeat(img.shape[0], 1, 1).to(device=device, dtype=dtype)
         print(f"modulation_index has the value {modulation_index}")
         # and we need to broadcast timestep and guidance along too
-        timestep_guidance = torch.cat([distill_timestep, distil_guidance], dim=1).unsqueeze(1).repeat(1, mod_index_length, 1)
+        timestep_guidance = torch.cat([distill_timestep, distil_guidance], dim=1).unsqueeze(1).repeat(1, mod_index_length, 1).to(device=device, dtype=dtype)
         print(f"timestep_guidance has the value {timestep_guidance}")
         # then and only then we could concatenate it together
         input_vec = torch.cat([timestep_guidance, modulation_index], dim=-1)
