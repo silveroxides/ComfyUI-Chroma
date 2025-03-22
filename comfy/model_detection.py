@@ -154,7 +154,7 @@ def detect_unet_config(state_dict, key_prefix, metadata=None):
         dit_config["guidance_embed"] = len(guidance_keys) > 0
         return dit_config
 
-    if '{}distilled_guidance_layer.0.norms.0.scale'.format(key_prefix) in state_dict_keys: #Chroma
+    if '{}distilled_guidance_layer.0.norms.0.scale'.format(key_prefix) in state_dict_keys or '{}distilled_guidance_layer.norms.0.scale'.format(key_prefix) in state_dict_keys: #Chroma
         dit_config = {}
         dit_config["image_model"] = "chroma"
         dit_config["depth"] = 48

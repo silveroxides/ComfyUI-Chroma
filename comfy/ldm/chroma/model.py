@@ -68,6 +68,7 @@ class Chroma(nn.Module):
         self.n_layers = params.n_layers
         self.pe_embedder = EmbedND(dim=pe_dim, theta=params.theta, axes_dim=params.axes_dim)
         self.img_in = operations.Linear(self.in_channels, self.hidden_size, bias=True, dtype=dtype, device=device)
+        self.time_in = MLPEmbedder(in_dim=64, hidden_dim=self.hidden_size, dtype=dtype, device=device, operations=operations)
         self.txt_in = operations.Linear(params.context_in_dim, self.hidden_size, dtype=dtype, device=device)
         # set as nn identity for now, will overwrite it later.
         self.distilled_guidance_layer = Approximator(
@@ -77,6 +78,10 @@ class Chroma(nn.Module):
                     n_layers=self.n_layers,
                     dtype=dtype, device=device, operations=operations
                 )
+
+        self.guidance_in = (
+            MLPEmbedder(in_dim=64, hidden_dim=self.hidden_size, dtype=dtype, device=device, operations=operations) if self.distilled_guidance_layer else nn.Identity()
+        )
 
         self.double_blocks = nn.ModuleList(
             [
@@ -229,60 +234,36 @@ class Chroma(nn.Module):
         transformer_options={},
         attn_mask: Tensor = None,
     ) -> Tensor:
-        print(f"img has the value {img.size()}")
-        print(f"img_ids has the value {img_ids.size()}")
-        print(f"txt has the value {txt.size()}")
-        print(f"txt_ids has the value {txt_ids.size()}")
-        print(f"timesteps has the value {timesteps.size()}")
-        print(f"guidance has the value {guidance.size()}")
-        print(f"control has the value {control}")
-        print(f"transformer_options has the value {transformer_options}")
         patches_replace = transformer_options.get("patches_replace", {})
         if img.ndim != 3 or txt.ndim != 3:
             raise ValueError("Input img and txt tensors must have 3 dimensions.")
 
         # running on sequences img
         img = self.img_in(img)
-        print(f"img has the value {img.size()}")
 
-        device = img.device
-        dtype = img.dtype
         # distilled vector guidance
         mod_index_length = 344
-        print(f"mod_index_length has the value {mod_index_length}")
-        distill_timestep = timestep_embedding(timesteps.detach().clone(), 16).to(device=device, dtype=dtype)
-        print(f"distill_timestep has the value {distill_timestep}")
+        distill_timestep = timestep_embedding(timesteps.detach().clone(), 16).to(img.device, img.dtype)
         # guidance = guidance *
-        distil_guidance = timestep_embedding(guidance.detach().clone(), 16).to(device=device, dtype=dtype)
-        print(f"distil_guidance has the value {distil_guidance}")
+        distil_guidance = timestep_embedding(guidance.detach().clone(), 16).to(img.device, img.dtype)
 
         # get all modulation index
-        modulation_index = timestep_embedding(torch.arange(mod_index_length), 32).to(device=device, dtype=dtype)
-        print(f"modulation_index has the value {modulation_index}")
+        modulation_index = timestep_embedding(torch.arange(mod_index_length), 32).to(img.device, img.dtype)
         # we need to broadcast the modulation index here so each batch has all of the index
-        modulation_index = modulation_index.unsqueeze(0).repeat(img.shape[0], 1, 1).to(device=device, dtype=dtype)
-        print(f"modulation_index has the value {modulation_index}")
+        modulation_index = modulation_index.unsqueeze(0).repeat(img.shape[0], 1, 1).to(img.device, img.dtype)
         # and we need to broadcast timestep and guidance along too
-        timestep_guidance = torch.cat([distill_timestep, distil_guidance], dim=1).unsqueeze(1).repeat(1, mod_index_length, 1).to(device=device, dtype=dtype)
-        print(f"timestep_guidance has the value {timestep_guidance}")
+        timestep_guidance = torch.cat([distill_timestep, distil_guidance], dim=1).unsqueeze(1).repeat(1, mod_index_length, 1).to(img.dtype).to(img.device, img.dtype)
         # then and only then we could concatenate it together
-        input_vec = torch.cat([timestep_guidance, modulation_index], dim=-1)
-        print(f"input_vec has the value {input_vec}")
+        input_vec = torch.cat([timestep_guidance, modulation_index], dim=-1).to(img.device, img.dtype)
 
         mod_vectors = self.distilled_guidance_layer(input_vec)
-        # print(f"mod_vectors has the value {mod_vectors}")
 
         mod_vectors_dict = self.distribute_modulations(mod_vectors, 38, 19)
-        print(f"mod_vectors_dict has the value {mod_vectors_dict}")
-
 
         txt = self.txt_in(txt)
-        print(f"self.txt_in has the value {txt}")
 
         ids = torch.cat((txt_ids, img_ids), dim=1)
-        print(f"torch.cat((txt_ids, img_ids), dim=1) has the value {ids}")
         pe = self.pe_embedder(ids)
-        print(f"self.pe_embedder(ids) has the value {pe}")
 
         blocks_replace = patches_replace.get("dit", {})
         for i, block in enumerate(self.double_blocks):

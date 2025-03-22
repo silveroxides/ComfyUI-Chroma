@@ -1057,7 +1057,7 @@ class Chroma(BaseModel):
     def concat_cond(self, **kwargs):
         try:
             #Handle Flux control loras dynamically changing the img_in weight.
-            num_channels = self.diffusion_model.img_in.weight.shape[1] // (self.diffusion_model.patch_size * self.diffusion_model.patch_size)
+            num_channels = self.diffusion_model.img_in.weight.shape[1]
         except:
             #Some cases like tensorrt might not have the weights accessible
             num_channels = self.model_config.unet_config["in_channels"]

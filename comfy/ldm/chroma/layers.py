@@ -117,10 +117,10 @@ class Modulation(nn.Module):
 class Approximator(nn.Module):
     def __init__(self, in_dim: int, out_dim: int, hidden_dim: int, n_layers = 5, dtype=None, device=None, operations=None):
         super().__init__()
-        self.in_proj = operations.Linear(in_dim, hidden_dim, bias=True)
-        self.layers = nn.ModuleList([MLPEmbedder( hidden_dim, hidden_dim, operations=operations) for x in range( n_layers)])
-        self.norms = nn.ModuleList([RMSNorm( hidden_dim, operations=operations) for x in range( n_layers)])
-        self.out_proj = operations.Linear(hidden_dim, out_dim)
+        self.in_proj = operations.Linear(in_dim, hidden_dim, bias=True, dtype=dtype, device=device)
+        self.layers = nn.ModuleList([MLPEmbedder(hidden_dim, hidden_dim, dtype=dtype, device=device, operations=operations) for x in range( n_layers)])
+        self.norms = nn.ModuleList([RMSNorm(hidden_dim, dtype=dtype, device=device, operations=operations) for x in range( n_layers)])
+        self.out_proj = operations.Linear(hidden_dim, out_dim, dtype=dtype, device=device)
 
     @property
     def device(self):
